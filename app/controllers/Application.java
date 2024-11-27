@@ -5,6 +5,7 @@ import com.github.jknack.handlebars.Handlebars;
 import com.github.jknack.handlebars.io.TemplateLoader;
 import com.google.inject.Inject;
 
+import com.hp.hpl.jena.query.QueryExecution;
 import com.hp.hpl.jena.query.QueryExecutionFactory;
 import com.hp.hpl.jena.query.QueryFactory;
 import com.hp.hpl.jena.rdf.model.Model;
@@ -19,6 +20,7 @@ import java.util.Map.Entry;
 import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpHeaders;
 import play.Logger.ALogger;
 import play.api.Configuration;
 import play.Logger;
@@ -46,19 +48,25 @@ import java.util.ArrayList;
  */
 public class Application extends Controller {
 
-  private static Map<String, Object> mimeTypeParserMap = generateParserMap();// generateValueMap(ConfigFactory.load().getConfig("parser"));
+  public static final String JSON_LD = "JSON-LD";
+  public static final String MSG_PARAMETER_IS_NOT_SUPPORTED = "Parameter %s is not supported for this statement";
+  public static final String MSG_WRONG_DATE_PARAMETER_FORMAT = "Wrong format for the date parameter";
+  public static final String MSG_UNAUTHORISED_RELATED_URL_PARAM = "Unauthorised use of the relatedURL parameter";
+  public static final String MIME_TYPE_TEXT_HTML = "text/html";
+  public static final String REL_DERIVEDFROM = ">; rel=derivedfrom";
+  private static Map<String, Object> mimeTypeParserMap = generateParserMap();
   private ALogger logger =Logger.of(this.getClass());
 
   private static Map<String, Object> generateParserMap() {
     Map<String, Object> mimeTypeParserMap =  new HashMap<>();
     mimeTypeParserMap.put("text/turtle","TURTLE");
-    mimeTypeParserMap.put("application/json","JSON-LD");
-    mimeTypeParserMap.put("application/ld+json","JSON-LD");
-    mimeTypeParserMap.put("*/*","JSON-LD");
+    mimeTypeParserMap.put("application/json",JSON_LD);
+    mimeTypeParserMap.put("application/ld+json",JSON_LD);
+    mimeTypeParserMap.put("*/*", JSON_LD);
     return mimeTypeParserMap;
   }
 
-  private static Map<String, Object> mimeTypeExtMap =  generateExtentionsMap();//generateValueMap(ConfigFactory.load().getConfig("extension"));
+  private static Map<String, Object> mimeTypeExtMap =  generateExtentionsMap();
 
   private static Map<String, Object> generateExtentionsMap() {
     Map<String, Object> extensionsMap =  new HashMap<>();
@@ -94,13 +102,13 @@ public class Application extends Controller {
   }
 
   public Result getVocab(String version, Http.Request request) {
-    Logger.info("Getting vocab for version: {}", version);
-    if (request.accepts("text/html")) {
+    logger.info("Getting vocab for version: {}", version);
+    if (request.accepts(MIME_TYPE_TEXT_HTML)) {
       Locale locale = getLocale(request, null);
-      Logger.info("Vocab language : {}",locale.getLanguage());
+      logger.info("Vocab language : {}",locale.getLanguage());
       return redirect(routes.Application.getVocabPage(version, locale.getLanguage()).url());
     } else {
-      Logger.info(routes.Application.getVocabData(version, null).url());
+      logger.info(routes.Application.getVocabData(version, null).url());
       return redirect(routes.Application.getVocabData(version, null).url());
     }
   }
@@ -111,11 +119,11 @@ public class Application extends Controller {
       return notFoundPage(request);
     }
     String mimeType =getMimeType(request, extension);
-    String mime = routes.Application.getVocabData(version,mimeTypeExtMap.getOrDefault(mimeType.toString(),
+    String mime = routes.Application.getVocabData(version,mimeTypeExtMap.getOrDefault(mimeType,
         defaults.get("mime").toString()).toString()).url();
     String link = "<".concat(routes.Application.getVocabData(version, null)
-        .url()).concat(">; rel=derivedfrom");
-    return getData(vocab, mimeType).withHeaders("Content-Location", mime,"Link",    link);
+        .url()).concat(REL_DERIVEDFROM);
+    return getData(vocab, mimeType).withHeaders(HttpHeaders.CONTENT_LOCATION, mime,"Link",    link);
 
   }
 
@@ -125,15 +133,16 @@ public class Application extends Controller {
     if (vocab.isEmpty()) {
       return notFoundPage(request);
     }
-    String linkValue = "<".concat(routes.Application.getVocabPage(version, null).url()).concat(">; rel=derivedfrom");
+    String linkValue = "<".concat(routes.Application.getVocabPage(version, null).url()).concat(
+        REL_DERIVEDFROM);
     return getPage(vocab, "/".concat(locale.toLanguageTag()).concat("/statements/vocab.html"), locale.getLanguage(), null,request)
-        .withHeaders("Content-Language", locale.getLanguage(),"Link",linkValue);
+        .withHeaders(HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage(),"Link",linkValue);
   }
 
   public Result getStatement(String id, String version,Http.Request req) {
     if (!req.queryString().isEmpty()) {
       return notAcceptablePage(req).withHeaders("Alternates", setAlternates(req, id, version, true));
-    } else  if (req.accepts("text/html")) {
+    } else  if (req.accepts(MIME_TYPE_TEXT_HTML)) {
       Locale locale = getLocale(req, null);
       return redirect(routes.Application.getStatementPage(id, version, locale.getLanguage()).url());
     } else {
@@ -151,10 +160,10 @@ public class Application extends Controller {
     }
     String  mimeType = getMimeType(req, extension);
     String location = routes.Application.getStatementData(id, version,
-            mimeTypeExtMap.getOrDefault(mimeType.toString(), defaults.get("mime").toString())
+            mimeTypeExtMap.getOrDefault(mimeType, defaults.get("mime").toString())
                 .toString()).url();
     String link = "<".concat(routes.Application.getStatementData(id, version, null)
-        .url()).concat(">; rel=derivedfrom");
+        .url()).concat(REL_DERIVEDFROM);
     return getData(rightsStatement, mimeType).withHeaders("Content-Location", location,"Link", link);
   }
 
@@ -166,29 +175,33 @@ public class Application extends Controller {
     if (rightsStatement.isEmpty()) {
       return notFoundPage(req);
     }
-    HashMap<String, String> parameters = getParameters(req, id);
-    String validationResult = validateParameters(parameters);
+    HashMap<String, String> parameters = getValidParameterValueMap(req, id);
+    String validationResult = validateParameters(parameters,req);
     if(validationResult != null)
       return status(400,validationResult);
     return getPage(rightsStatement, "/en/statement.hbs", locale.getLanguage(),
         parameters, req).withHeaders("Content-Language", locale.getLanguage(),"Link", "<".concat(routes.Application.getStatementPage(id, version, null)
-        .url()).concat(">; rel=derivedfrom"));
+        .url()).concat(REL_DERIVEDFROM));
   }
 
-  private String validateParameters(HashMap<String, String> parameters) {
-    for(Entry e: parameters.entrySet()) {
-      if ("relatedURL".equals(e.getKey()) && !isValidRelatedURL(e.getValue().toString())) {
-        return "Unauthorised use of the relatedURL parameter";
+  private String validateParameters(HashMap<String, String> parameters, Request req) {
+     Map<String, String[]> suppliedParameters = req.queryString();
+    for (Entry<String, String[]> e : suppliedParameters.entrySet()) {
+      if (!"language".equals(e.getKey()) && !parameters.keySet().contains(e.getKey())) {
+        return String.format(MSG_PARAMETER_IS_NOT_SUPPORTED, e.getKey());
       }
-      if ("date".equals(e.getKey()) && !isValidDate(e.getValue().toString())) {
-         return "Wrong format for the date parameter";
+      if ("relatedURL".equals(e.getKey()) && !isValidRelatedURL(e.getValue())) {
+        return MSG_UNAUTHORISED_RELATED_URL_PARAM;
+      }
+      if ("date".equals(e.getKey()) && !isValidDate(e.getValue())) {
+        return MSG_WRONG_DATE_PARAMETER_FORMAT;
       }
     }
     return null;
   }
 
   public Result getCollection(String id, String version,Http.Request req) {
-    if (req.accepts("text/html")) {
+    if (req.accepts(MIME_TYPE_TEXT_HTML)) {
       Locale locale = getLocale(req, null);
       return redirect(routes.Application.getCollectionPage(id, version, locale.getLanguage()).url());
     } else {
@@ -203,9 +216,9 @@ public class Application extends Controller {
     }
     String mimeType = getMimeType(req, extension);
     String mime = routes.Application.getCollectionData(id, version,
-            mimeTypeExtMap.getOrDefault(mimeType.toString(), defaults.get("mime").toString()).toString()).url();
+            mimeTypeExtMap.getOrDefault(mimeType, defaults.get("mime").toString()).toString()).url();
     String link = "<".concat(routes.Application.getCollectionData(id, version, null)
-        .url()).concat(">; rel=derivedfrom");
+        .url()).concat(REL_DERIVEDFROM);
     return getData(collection, mimeType).withHeaders("Content-Location", mime,"Link", link);
   }
 
@@ -217,18 +230,18 @@ public class Application extends Controller {
       return notFoundPage(req);
     }
     String concat = "<".concat(routes.Application.getCollectionPage(id, version, null)
-        .url()).concat(">; rel=derivedfrom");
+        .url()).concat(REL_DERIVEDFROM);
     Result result = getPage(collection,
         locale.toLanguageTag().concat("/statements/collection-").concat(id).concat(".html"),
         locale.getLanguage(), null, req);
-    return  result.withHeaders("Link", concat,"Content-Language", locale.getLanguage());
+    return  result.withHeaders("Link", concat, HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage());
   }
 
   private Result notFoundPage(Request request) {
     TemplateLoader loader = layoutProvider.getTemplateLoader();
     loader.setPrefix(getDeployUrl(request));
     try {
-      return notFound(loader.sourceAt("/en/404.html").content()).as("text/html");
+      return notFound(loader.sourceAt("/en/404.html").content()).as(MIME_TYPE_TEXT_HTML);
     } catch (IOException e) {
       Logger.error(e.toString());
       return notFound("Not Found");
@@ -240,7 +253,7 @@ public class Application extends Controller {
     loader.setPrefix(getDeployUrl(req));
     try {
       Logger.error("Request not acceptable : {} {} ",req.method(), req.uri().toString());
-      return status(406, loader.sourceAt("/en/406.html").content()).as("text/html");
+      return status(406, loader.sourceAt("/en/406.html").content()).as(MIME_TYPE_TEXT_HTML);
     } catch (IOException e) {
       Logger.error(e.toString());
       return status(406, "Not Acceptable");
@@ -262,15 +275,18 @@ public class Application extends Controller {
       throws IOException {
 
     Model localized = ModelFactory.createDefaultModel();
-    QueryExecutionFactory.create(QueryFactory.create(String.format(sparqlQueries.get("localize").toString(), language)),
-        model).execConstruct(localized);
+    try(QueryExecution queryExecution = QueryExecutionFactory.create(
+        QueryFactory.create(String.format(sparqlQueries.get("localize").toString(), language)),
+        model)) {
+      queryExecution.execConstruct(localized);
+    }
 
     Map<String, Object> scope = new HashMap<>();
     scope.put("parameters", parameters);
     scope.put("language", language);
 
     OutputStream boas = new ByteArrayOutputStream();
-    localized.write(boas, "JSON-LD");
+    localized.write(boas, JSON_LD);
 
     String output = boas.toString();
     scope.put("data", new ObjectMapper().readValue(output, HashMap.class));
@@ -285,27 +301,36 @@ public class Application extends Controller {
       Logger.error(e.toString());
     }
     String apply = handlebars.compile(templateFile).apply(scope);
-    return ok(apply).as("text/html");
+    return ok(apply).as(MIME_TYPE_TEXT_HTML);
   }
 
   private Model getVocabModel(String version) {
     Model vocab = ModelFactory.createDefaultModel();
-    QueryExecutionFactory.create(QueryFactory.create(String.format(sparqlQueries.get("vocab").toString(), version)),
-        vocabProvider.getVocab()).execConstruct(vocab);
+    try(QueryExecution queryExecution = QueryExecutionFactory.create(
+        QueryFactory.create(String.format(sparqlQueries.get("vocab").toString(), version)),
+        vocabProvider.getVocab())) {
+      queryExecution.execConstruct(vocab);
+    }
     return vocab;
   }
 
   private Model getStatementModel(String id, String version) {
     Model statement = ModelFactory.createDefaultModel();
-    QueryExecutionFactory.create(QueryFactory.create(String.format(sparqlQueries.get("statement").toString(), version,
-        id)), vocabProvider.getVocab()).execConstruct(statement);
+    try(QueryExecution queryExecution = QueryExecutionFactory.create(
+        QueryFactory.create(String.format(sparqlQueries.get("statement").toString(), version,
+            id)), vocabProvider.getVocab())) {
+      queryExecution.execConstruct(statement);
+    }
     return statement;
   }
 
   private Model getCollectionModel(String id, String version) {
     Model collection = ModelFactory.createDefaultModel();
-    QueryExecutionFactory.create(QueryFactory.create(String.format(sparqlQueries.get("collection").toString(), id,
-        version)), vocabProvider.getVocab()).execConstruct(collection);
+    try(QueryExecution queryExecution = QueryExecutionFactory.create(
+        QueryFactory.create(String.format(sparqlQueries.get("collection").toString(), id,
+            version)), vocabProvider.getVocab())) {
+      queryExecution.execConstruct(collection);
+    }
     return collection;
   }
 
@@ -374,7 +399,7 @@ public class Application extends Controller {
     List<String> alternates = new ArrayList<>();
     if (request.queryString().size() > 0) {
       List<String> recoveryParameters = new ArrayList<>();
-      for (Map.Entry<String, String> parameter : getParameters(request, id).entrySet()) {
+      for (Map.Entry<String, String> parameter : getValidParameterValueMap(request, id).entrySet()) {
         recoveryParameters.add(parameter.getKey().concat("=").concat(parameter.getValue()));
       }
       if (!recoveryParameters.isEmpty()) {
@@ -397,13 +422,11 @@ public class Application extends Controller {
     return String.join(",", alternates);
   }
 
-  private HashMap<String, String> getParameters(Http.Request request, String id) {
-
+  private HashMap<String, String> getValidParameterValueMap(Http.Request request, String id) {
+    List<String> validParams = getConfiguredParameterForId(id);
     HashMap<String, String> parameters = new HashMap<>();
-    String validParameters =  Application.validParameters.get(id)!=null? Application.validParameters.get(id).toString():null;
-
-    if (validParameters != null) {
-      for (String validParameter : validParameters.split(" ")) {
+    if (validParams != null) {
+      for (String validParameter : validParams) {
         String suppliedParameter = request.getQueryString(validParameter);
         if (suppliedParameter != null) {
             parameters.put(validParameter, StringEscapeUtils.escapeHtml4(request.getQueryString(validParameter)));
@@ -413,30 +436,36 @@ public class Application extends Controller {
     return parameters;
   }
 
+  private static List<String> getConfiguredParameterForId(String id) {
+    return Application.validParameters.get(id) != null ? List.of(
+        Application.validParameters.get(id).toString().split(" ")) : new ArrayList<>();
+  }
+
   /**
    * parses a date without an offset, such as '2011-12-03'
    * @param value
    * @return
    */
-  private boolean isValidDate(String value) {
+  private boolean isValidDate(String[] value) {
     DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE;
     try{
-      formatter.parse(value);
+      //considering first value in case multiple values provided for the same parameter
+      formatter.parse(value[0]);
       return true;
     } catch (DateTimeParseException e){
       return false;
     }
   }
 
-  private boolean isValidRelatedURL(String value) {
+  private boolean isValidRelatedURL(String[] value) {
     List<String> blackListedURLPatterns = configuration.underlying().getStringList("blacklist.relatedURL");
-    List<Pattern> patternList =  new ArrayList<>();
-    for(String s : blackListedURLPatterns )
-    {
-      Pattern urlPattern  = Pattern.compile(s);
-      patternList.add(urlPattern);
+    List<Pattern> patternList = new ArrayList<>();
+    for(String s : blackListedURLPatterns){
+        Pattern urlPattern = Pattern.compile(s);
+        patternList.add(urlPattern);
     }
-    return ! patternList.stream().anyMatch(p->  p.matcher(value).matches());
+      //validating the first value in case multiple values provided for same parameter
+    return !patternList.stream().anyMatch(p -> p.matcher(value[0]).matches());
   }
 
   private String getDeployUrl(Http.Request req) {
