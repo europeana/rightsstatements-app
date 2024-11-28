@@ -85,6 +85,8 @@ public class Application extends Controller {
 
   private static Map<String, Object> languages = generateValueMap(ConfigFactory.load().getConfig("languages"));
 
+  private static List<Pattern> blackListedUrlsPatterns = getUrlPatterns(ConfigFactory.load().getStringList("blacklist.relatedURL"));
+
   private final VocabProvider vocabProvider;
 
   private final LayoutProvider layoutProvider;
@@ -185,15 +187,16 @@ public class Application extends Controller {
   }
 
   private String validateParameters(HashMap<String, String> parameters, Request req) {
-     Map<String, String[]> suppliedParameters = req.queryString();
-    for (Entry<String, String[]> e : suppliedParameters.entrySet()) {
-      if (!"language".equals(e.getKey()) && !parameters.keySet().contains(e.getKey())) {
-        return String.format(MSG_PARAMETER_IS_NOT_SUPPORTED, e.getKey());
+    for ( String  e :  req.queryString().keySet()) {
+      String value = req.getQueryString(e);
+      //language parameter is not considered for validation checks see /page/ paths in conf/routes file
+      if (!"language".equals(e) && !parameters.keySet().contains(e)) {
+        return String.format(MSG_PARAMETER_IS_NOT_SUPPORTED, e);
       }
-      if ("relatedURL".equals(e.getKey()) && !isValidRelatedURL(e.getValue())) {
+      if ("relatedURL".equals(e) && !isValidRelatedURL(value)) {
         return MSG_UNAUTHORISED_RELATED_URL_PARAM;
       }
-      if ("date".equals(e.getKey()) && !isValidDate(e.getValue())) {
+      if ("date".equals(e) && !isValidDate(value)) {
         return MSG_WRONG_DATE_PARAMETER_FORMAT;
       }
     }
@@ -446,26 +449,27 @@ public class Application extends Controller {
    * @param value
    * @return
    */
-  private boolean isValidDate(String[] value) {
+  private boolean isValidDate(String value) {
     DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE;
     try{
-      //considering first value in case multiple values provided for the same parameter
-      formatter.parse(value[0]);
+      formatter.parse(value);
       return true;
     } catch (DateTimeParseException e){
       return false;
     }
   }
 
-  private boolean isValidRelatedURL(String[] value) {
-    List<String> blackListedURLPatterns = configuration.underlying().getStringList("blacklist.relatedURL");
-    List<Pattern> patternList = new ArrayList<>();
+  private boolean isValidRelatedURL(String value) {
+     return !blackListedUrlsPatterns.stream().anyMatch(p -> p.matcher(value).matches());
+  }
+
+  private static List<Pattern> getUrlPatterns(List<String> blackListedURLPatterns) {
+     List<Pattern> patternList = new ArrayList<>();
     for(String s : blackListedURLPatterns){
         Pattern urlPattern = Pattern.compile(s);
         patternList.add(urlPattern);
     }
-      //validating the first value in case multiple values provided for same parameter
-    return !patternList.stream().anyMatch(p -> p.matcher(value[0]).matches());
+    return patternList;
   }
 
   private String getDeployUrl(Http.Request req) {
