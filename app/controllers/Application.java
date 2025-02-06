@@ -16,7 +16,6 @@ import com.typesafe.config.ConfigFactory;
 
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.Map.Entry;
 import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -52,10 +51,11 @@ public class Application extends Controller {
   public static final String MSG_PARAMETER_IS_NOT_SUPPORTED = "Parameter %s is not supported for this statement";
   public static final String MSG_WRONG_DATE_PARAMETER_FORMAT = "Wrong format for the date parameter";
   public static final String MSG_UNAUTHORISED_RELATED_URL_PARAM = "Unauthorised use of the relatedURL parameter";
+  public static final String MSG_UNSUPPORTED_LANGUAGE_PARAM = "Language % is not supported";
   public static final String MIME_TYPE_TEXT_HTML = "text/html";
   public static final String REL_DERIVEDFROM = ">; rel=derivedfrom";
-  private static Map<String, Object> mimeTypeParserMap = generateParserMap();
-  private ALogger logger =Logger.of(this.getClass());
+  private static final Map<String, Object> mimeTypeParserMap = generateParserMap();
+  private final ALogger logger =Logger.of(this.getClass());
 
   private static Map<String, Object> generateParserMap() {
     Map<String, Object> mimeTypeParserMap =  new HashMap<>();
@@ -66,7 +66,7 @@ public class Application extends Controller {
     return mimeTypeParserMap;
   }
 
-  private static Map<String, Object> mimeTypeExtMap =  generateExtentionsMap();
+  private static final  Map<String, Object> mimeTypeExtMap =  generateExtentionsMap();
 
   private static Map<String, Object> generateExtentionsMap() {
     Map<String, Object> extensionsMap =  new HashMap<>();
@@ -77,11 +77,11 @@ public class Application extends Controller {
     return extensionsMap;
   }
 
-  private static Map<String, Object> defaults =generateValueMap( ConfigFactory.load().getConfig("default"));
+  private static final Map<String, Object> defaults =generateValueMap( ConfigFactory.load().getConfig("default"));
 
-  private static Map<String, Object> validParameters = generateValueMap(ConfigFactory.load().getConfig("params"));
+  private static final Map<String, Object> validParameters = generateValueMap(ConfigFactory.load().getConfig("params"));
 
-  private static Map<String, Object> sparqlQueries = generateValueMap(ConfigFactory.load().getConfig("queries"));
+  private static final Map<String, Object> sparqlQueries = generateValueMap(ConfigFactory.load().getConfig("queries"));
 
   private static Map<String, Object> languages = generateValueMap(ConfigFactory.load().getConfig("languages"));
 
@@ -189,7 +189,7 @@ public class Application extends Controller {
   private String validateParameters(HashMap<String, String> parameters, Request req) {
     for ( String  e :  req.queryString().keySet()) {
       String value = req.getQueryString(e);
-      //language parameter is not considered for validation checks see /page/ paths in conf/routes file
+      //language parameter is later validated based on available languages
       if (!"language".equals(e) && !parameters.keySet().contains(e)) {
         return String.format(MSG_PARAMETER_IS_NOT_SUPPORTED, e);
       }
@@ -198,6 +198,10 @@ public class Application extends Controller {
       }
       if ("date".equals(e) && !isValidDate(value)) {
         return MSG_WRONG_DATE_PARAMETER_FORMAT;
+      }
+      List<String> availableLanguages = Arrays.stream(languages.get("available").toString().split(" ")).toList();
+      if ("language".equals(e) && !availableLanguages.contains(value)){
+        return String.format(MSG_UNSUPPORTED_LANGUAGE_PARAM,value);
       }
     }
     return null;
