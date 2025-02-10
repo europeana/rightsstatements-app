@@ -51,7 +51,7 @@ public class Application extends Controller {
   public static final String MSG_PARAMETER_IS_NOT_SUPPORTED = "Parameter %s is not supported for this statement";
   public static final String MSG_WRONG_DATE_PARAMETER_FORMAT = "Wrong format for the date parameter";
   public static final String MSG_UNAUTHORISED_RELATED_URL_PARAM = "Unauthorised use of the relatedURL parameter";
-  public static final String MSG_UNSUPPORTED_LANGUAGE_PARAM = "Language % is not supported";
+  public static final String MSG_UNSUPPORTED_LANGUAGE_PARAM = "Unsupported language %s";
   public static final String MIME_TYPE_TEXT_HTML = "text/html";
   public static final String REL_DERIVEDFROM = ">; rel=derivedfrom";
   private static final Map<String, Object> mimeTypeParserMap = generateParserMap();
@@ -130,6 +130,11 @@ public class Application extends Controller {
   }
 
   public Result getVocabPage(String version, String language,Http.Request request) throws IOException {
+
+    String validationResult = validateLanguageParam(language);
+    if(validationResult != null)
+      return status(400,validationResult);
+
     Model vocab = getVocabModel(version);
     Locale locale = getLocale(request, language);
     if (vocab.isEmpty()) {
@@ -171,22 +176,24 @@ public class Application extends Controller {
 
   public Result getStatementPage(String id, String version, String language,Http.Request req) throws IOException {
 
+    HashMap<String, String> parameters = getValidParameterValueMap(req, id);
+    String validationResult = validateParameters(parameters,req,language);
+    if(validationResult != null)
+      return status(400,validationResult);
+
     Model rightsStatement = getStatementModel(id, version);
     Locale locale = getLocale(req, language);
 
     if (rightsStatement.isEmpty()) {
       return notFoundPage(req);
     }
-    HashMap<String, String> parameters = getValidParameterValueMap(req, id);
-    String validationResult = validateParameters(parameters,req);
-    if(validationResult != null)
-      return status(400,validationResult);
+
     return getPage(rightsStatement, "/en/statement.hbs", locale.getLanguage(),
         parameters, req).withHeaders("Content-Language", locale.getLanguage(),"Link", "<".concat(routes.Application.getStatementPage(id, version, null)
         .url()).concat(REL_DERIVEDFROM));
   }
 
-  private String validateParameters(HashMap<String, String> parameters, Request req) {
+  private String validateParameters(HashMap<String, String> parameters, Request req,String language) {
     for ( String  e :  req.queryString().keySet()) {
       String value = req.getQueryString(e);
       //language parameter is later validated based on available languages
@@ -199,12 +206,16 @@ public class Application extends Controller {
       if ("date".equals(e) && !isValidDate(value)) {
         return MSG_WRONG_DATE_PARAMETER_FORMAT;
       }
-      List<String> availableLanguages = Arrays.stream(languages.get("available").toString().split(" ")).toList();
-      if ("language".equals(e) && !availableLanguages.contains(value)){
-        return String.format(MSG_UNSUPPORTED_LANGUAGE_PARAM,value);
-      }
     }
-    return null;
+    return validateLanguageParam(language);
+  }
+
+  private static String validateLanguageParam(String value) {
+    List<String> availableLanguages = Arrays.stream(languages.get("available").toString().split(" ")).toList();
+    //validate language only if parameter is provide
+    if(value!=null && !availableLanguages.contains(value))
+       return String.format(MSG_UNSUPPORTED_LANGUAGE_PARAM, value);
+     return null;
   }
 
   public Result getCollection(String id, String version,Http.Request req) {
@@ -230,6 +241,11 @@ public class Application extends Controller {
   }
 
   public Result getCollectionPage(String id, String version, String language,Http.Request req) throws IOException {
+
+    String validationResult = validateLanguageParam(language);
+    if(validationResult != null)
+      return status(400,validationResult);
+
     Model collection = getVocabModel(version);
     Locale locale = getLocale(req, language);
 
