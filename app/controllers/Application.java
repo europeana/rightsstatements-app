@@ -403,14 +403,10 @@ public class Application extends Controller {
   }
 
   private Locale[] getRequestedLocales(Request request, String language) {
-    Locale[] requestedLocales;
-
     if (language != null) {
-      requestedLocales = getLocalesByCode(language);
-    } else {
-      requestedLocales = getLocalesFromRequest(request);
-    }
-    return requestedLocales;
+      return getLocalesByCode(language);
+     }
+     return getLocalesFromRequest(request);
   }
 
   private Locale[] getLocalesFromRequest(Http.Request request) {
