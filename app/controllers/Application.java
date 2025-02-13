@@ -145,8 +145,7 @@ public class Application extends Controller {
     String linkValue = "<".concat(routes.Application.getVocabPage(version, null).url()).concat(
         REL_DERIVEDFROM);
     String page = getPage(vocab, "/".concat(locale.toLanguageTag()).concat("/statements/vocab.html"), locale.getLanguage(), null,request);
-    int status = StringUtils.isBlank(language)?MOVED_PERMANENTLY:OK;
-    return status(status, page).withHeaders(HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage(),"Link",linkValue).as(MIME_TYPE_TEXT_HTML);
+    return status(OK, page).withHeaders(HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage(),"Link",linkValue).as(MIME_TYPE_TEXT_HTML);
   }
 
   public Result getStatement(String id, String version,Http.Request req) {
@@ -193,8 +192,7 @@ public class Application extends Controller {
      String page = getPage(rightsStatement, "/en/statement.hbs", locale.getLanguage(),
         parameters, req);
 
-    int status = StringUtils.isBlank(language)?MOVED_PERMANENTLY:OK;
-    return status(status,page).withHeaders("Content-Language", locale.getLanguage(),"Link", "<".concat(routes.Application.getStatementPage(id, version, null)
+    return status(OK,page).withHeaders("Content-Language", locale.getLanguage(),"Link", "<".concat(routes.Application.getStatementPage(id, version, null)
         .url()).concat(REL_DERIVEDFROM)).as(MIME_TYPE_TEXT_HTML);
   }
 
@@ -262,8 +260,7 @@ public class Application extends Controller {
         locale.toLanguageTag().concat("/statements/collection-").concat(id).concat(".html"),
         locale.getLanguage(), null, req);
 
-    int status = StringUtils.isBlank(language)?MOVED_PERMANENTLY:OK;
-    return status(status,page).withHeaders("Link", concat, HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage()).as(MIME_TYPE_TEXT_HTML);
+    return status(OK,page).withHeaders("Link", concat, HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage()).as(MIME_TYPE_TEXT_HTML);
   }
 
   private Result notFoundPage(Request request) {
