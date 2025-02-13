@@ -85,7 +85,8 @@ public class Application extends Controller {
   private static final Map<String, Object> sparqlQueries = generateValueMap(ConfigFactory.load().getConfig("queries"));
 
   private static final List<String> languages = generateAvailableLanguageList(ConfigFactory.load().getString("languages.available"));
-  public static final Locale[] AVAILABLE_LOCALES = languages.stream().map(Locale::forLanguageTag).toArray(Locale[]::new);
+
+  public static final Locale[] availableLocals = languages.stream().map(Locale::forLanguageTag).toArray(Locale[]::new);
 
   private static final List<Pattern> blackListedUrlsPatterns = getUrlPatterns(ConfigFactory.load().getStringList("blacklist.relatedURL"));
 
@@ -391,12 +392,12 @@ public class Application extends Controller {
     Locale[] requestedLocales = getRequestedLocales(request, language);
     if (requestedLocales != null) {
       for (Locale requestedLocale : requestedLocales) {
-        if (Arrays.asList(AVAILABLE_LOCALES).contains(requestedLocale)) {
+        if (Arrays.asList(availableLocals).contains(requestedLocale)) {
           return requestedLocale;
         }
       }
     }
-    return AVAILABLE_LOCALES[0];
+    return availableLocals[0];
   }
 
   private Locale[] getRequestedLocales(Request request, String language) {
