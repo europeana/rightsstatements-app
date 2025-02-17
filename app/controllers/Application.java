@@ -16,7 +16,7 @@ import com.typesafe.config.ConfigFactory;
 
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.Map.Entry;
+import java.util.Collections;
 import java.util.regex.Pattern;
 import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -52,10 +52,11 @@ public class Application extends Controller {
   public static final String MSG_PARAMETER_IS_NOT_SUPPORTED = "Parameter %s is not supported for this statement";
   public static final String MSG_WRONG_DATE_PARAMETER_FORMAT = "Wrong format for the date parameter";
   public static final String MSG_UNAUTHORISED_RELATED_URL_PARAM = "Unauthorised use of the relatedURL parameter";
+  public static final String MSG_UNSUPPORTED_LANGUAGE_PARAM = "Unsupported language %s";
   public static final String MIME_TYPE_TEXT_HTML = "text/html";
   public static final String REL_DERIVEDFROM = ">; rel=derivedfrom";
-  private static Map<String, Object> mimeTypeParserMap = generateParserMap();
-  private ALogger logger =Logger.of(this.getClass());
+  private static final Map<String, Object> mimeTypeParserMap = generateParserMap();
+  private final ALogger logger =Logger.of(this.getClass());
 
   private static Map<String, Object> generateParserMap() {
     Map<String, Object> mimeTypeParserMap =  new HashMap<>();
@@ -66,7 +67,7 @@ public class Application extends Controller {
     return mimeTypeParserMap;
   }
 
-  private static Map<String, Object> mimeTypeExtMap =  generateExtentionsMap();
+  private static final  Map<String, Object> mimeTypeExtMap =  generateExtentionsMap();
 
   private static Map<String, Object> generateExtentionsMap() {
     Map<String, Object> extensionsMap =  new HashMap<>();
@@ -77,15 +78,17 @@ public class Application extends Controller {
     return extensionsMap;
   }
 
-  private static Map<String, Object> defaults =generateValueMap( ConfigFactory.load().getConfig("default"));
+  private static final Map<String, Object> defaults =generateValueMap( ConfigFactory.load().getConfig("default"));
 
-  private static Map<String, Object> validParameters = generateValueMap(ConfigFactory.load().getConfig("params"));
+  private static final Map<String, Object> validParameters = generateValueMap(ConfigFactory.load().getConfig("params"));
 
-  private static Map<String, Object> sparqlQueries = generateValueMap(ConfigFactory.load().getConfig("queries"));
+  private static final Map<String, Object> sparqlQueries = generateValueMap(ConfigFactory.load().getConfig("queries"));
 
-  private static Map<String, Object> languages = generateValueMap(ConfigFactory.load().getConfig("languages"));
+  private static final List<String> languages = generateAvailableLanguageList(ConfigFactory.load().getString("languages.available"));
 
-  private static List<Pattern> blackListedUrlsPatterns = getUrlPatterns(ConfigFactory.load().getStringList("blacklist.relatedURL"));
+  public static final Locale[] availableLocals = languages.stream().map(Locale::forLanguageTag).toArray(Locale[]::new);
+
+  private static final List<Pattern> blackListedUrlsPatterns = getUrlPatterns(ConfigFactory.load().getStringList("blacklist.relatedURL"));
 
   private final VocabProvider vocabProvider;
 
@@ -130,6 +133,11 @@ public class Application extends Controller {
   }
 
   public Result getVocabPage(String version, String language,Http.Request request) throws IOException {
+
+    String validationResult = validateLanguageParam(language);
+    if(validationResult != null)
+      return status(400,validationResult);
+
     Model vocab = getVocabModel(version);
     Locale locale = getLocale(request, language);
     if (vocab.isEmpty()) {
@@ -137,8 +145,8 @@ public class Application extends Controller {
     }
     String linkValue = "<".concat(routes.Application.getVocabPage(version, null).url()).concat(
         REL_DERIVEDFROM);
-    return getPage(vocab, "/".concat(locale.toLanguageTag()).concat("/statements/vocab.html"), locale.getLanguage(), null,request)
-        .withHeaders(HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage(),"Link",linkValue);
+    String page = getPage(vocab, "/".concat(locale.toLanguageTag()).concat("/statements/vocab.html"), locale.getLanguage(), null,request);
+    return status(OK, page).withHeaders(HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage(),"Link",linkValue).as(MIME_TYPE_TEXT_HTML);
   }
 
   public Result getStatement(String id, String version,Http.Request req) {
@@ -171,25 +179,28 @@ public class Application extends Controller {
 
   public Result getStatementPage(String id, String version, String language,Http.Request req) throws IOException {
 
+    HashMap<String, String> parameters = getValidParameterValueMap(req, id);
+    String validationResult = validateParameters(parameters,req,language);
+    if(validationResult != null)
+      return status(400,validationResult);
+
     Model rightsStatement = getStatementModel(id, version);
     Locale locale = getLocale(req, language);
 
     if (rightsStatement.isEmpty()) {
       return notFoundPage(req);
     }
-    HashMap<String, String> parameters = getValidParameterValueMap(req, id);
-    String validationResult = validateParameters(parameters,req);
-    if(validationResult != null)
-      return status(400,validationResult);
-    return getPage(rightsStatement, "/en/statement.hbs", locale.getLanguage(),
-        parameters, req).withHeaders("Content-Language", locale.getLanguage(),"Link", "<".concat(routes.Application.getStatementPage(id, version, null)
-        .url()).concat(REL_DERIVEDFROM));
+     String page = getPage(rightsStatement, "/en/statement.hbs", locale.getLanguage(),
+        parameters, req);
+
+    return status(OK,page).withHeaders("Content-Language", locale.getLanguage(),"Link", "<".concat(routes.Application.getStatementPage(id, version, null)
+        .url()).concat(REL_DERIVEDFROM)).as(MIME_TYPE_TEXT_HTML);
   }
 
-  private String validateParameters(HashMap<String, String> parameters, Request req) {
+  private String validateParameters(HashMap<String, String> parameters, Request req,String language) {
     for ( String  e :  req.queryString().keySet()) {
       String value = req.getQueryString(e);
-      //language parameter is not considered for validation checks see /page/ paths in conf/routes file
+      //language parameter is later validated based on available languages
       if (!"language".equals(e) && !parameters.keySet().contains(e)) {
         return String.format(MSG_PARAMETER_IS_NOT_SUPPORTED, e);
       }
@@ -200,7 +211,14 @@ public class Application extends Controller {
         return MSG_WRONG_DATE_PARAMETER_FORMAT;
       }
     }
-    return null;
+    return validateLanguageParam(language);
+  }
+
+  private static String validateLanguageParam(String value) {
+    //validate language only if parameter is provide
+    if(!StringUtils.isBlank(value) && !languages.contains(value))
+       return String.format(MSG_UNSUPPORTED_LANGUAGE_PARAM, value);
+     return null;
   }
 
   public Result getCollection(String id, String version,Http.Request req) {
@@ -226,6 +244,10 @@ public class Application extends Controller {
   }
 
   public Result getCollectionPage(String id, String version, String language,Http.Request req) throws IOException {
+    String validationResult = validateLanguageParam(language);
+    if(validationResult != null)
+      return status(400,validationResult);
+
     Model collection = getVocabModel(version);
     Locale locale = getLocale(req, language);
 
@@ -234,10 +256,12 @@ public class Application extends Controller {
     }
     String concat = "<".concat(routes.Application.getCollectionPage(id, version, null)
         .url()).concat(REL_DERIVEDFROM);
-    Result result = getPage(collection,
+
+    String page = getPage(collection,
         locale.toLanguageTag().concat("/statements/collection-").concat(id).concat(".html"),
         locale.getLanguage(), null, req);
-    return  result.withHeaders("Link", concat, HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage());
+
+    return status(OK,page).withHeaders("Link", concat, HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage()).as(MIME_TYPE_TEXT_HTML);
   }
 
   private Result notFoundPage(Request request) {
@@ -255,7 +279,7 @@ public class Application extends Controller {
     TemplateLoader loader = layoutProvider.getTemplateLoader();
     loader.setPrefix(getDeployUrl(req));
     try {
-      Logger.error("Request not acceptable : {} {} ",req.method(), req.uri().toString());
+      Logger.error("Request not acceptable : {} {} ",req.method(), req.uri());
       return status(406, loader.sourceAt("/en/406.html").content()).as(MIME_TYPE_TEXT_HTML);
     } catch (IOException e) {
       Logger.error(e.toString());
@@ -274,7 +298,8 @@ public class Application extends Controller {
        return ok(result.toString());
   }
 
-  private Result getPage(Model model, String templateFile, String language, HashMap<String, String> parameters,Http.Request req)
+  private String getPage(Model model, String templateFile, String language, HashMap<String, String> parameters,
+      Request req)
       throws IOException {
 
     Model localized = ModelFactory.createDefaultModel();
@@ -303,8 +328,8 @@ public class Application extends Controller {
     } catch (Exception e) {
       Logger.error(e.toString());
     }
-    String apply = handlebars.compile(templateFile).apply(scope);
-    return ok(apply).as(MIME_TYPE_TEXT_HTML);
+    return handlebars.compile(templateFile).apply(scope);
+
   }
 
   private Model getVocabModel(String version) {
@@ -364,26 +389,22 @@ public class Application extends Controller {
   }
 
   private Locale getLocale(Http.Request request, String language) {
-
-    Locale[] requestedLocales;
-
-    if (language != null) {
-      requestedLocales = getLocalesByCode(language);
-    } else {
-      requestedLocales = getLocalesFromRequest(request);
-    }
-
-    Locale[] availableLocales = Arrays.stream(languages.get("available").toString().split(" +"))
-        .map(code -> Locale.forLanguageTag(code)).toArray(Locale[]::new);
-
+    Locale[] requestedLocales = getRequestedLocales(request, language);
     if (requestedLocales != null) {
       for (Locale requestedLocale : requestedLocales) {
-        if (Arrays.asList(availableLocales).contains(requestedLocale)) {
+        if (Arrays.asList(availableLocals).contains(requestedLocale)) {
           return requestedLocale;
         }
       }
     }
-    return availableLocales[0];
+    return availableLocals[0];
+  }
+
+  private Locale[] getRequestedLocales(Request request, String language) {
+    if (language != null) {
+      return getLocalesByCode(language);
+     }
+     return getLocalesFromRequest(request);
   }
 
   private Locale[] getLocalesFromRequest(Http.Request request) {
@@ -470,6 +491,10 @@ public class Application extends Controller {
         patternList.add(urlPattern);
     }
     return patternList;
+  }
+
+  private static List<String> generateAvailableLanguageList(String languages) {
+    return languages!=null ? Arrays.stream(languages.split(" +")).toList() : Collections.EMPTY_LIST;
   }
 
   private String getDeployUrl(Http.Request req) {
