@@ -26,6 +26,7 @@ import play.api.Configuration;
 import play.Logger;
 import play.api.Environment;
 import play.api.http.MediaRange;
+import play.i18n.Lang;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.Http.Request;
