@@ -86,7 +86,7 @@ public class Application extends Controller {
 
   private static final List<String> languages = generateAvailableLanguageList(ConfigFactory.load().getString("languages.available"));
 
-  public static final Locale[] availableLocals = languages.stream().map(Locale::forLanguageTag).toArray(Locale[]::new);
+  protected static final Locale[] availableLocals = languages.stream().map(Locale::forLanguageTag).toArray(Locale[]::new);
 
   private static final List<Pattern> blackListedUrlsPatterns = getUrlPatterns(ConfigFactory.load().getStringList("blacklist.relatedURL"));
 
@@ -96,7 +96,7 @@ public class Application extends Controller {
 
   private final Configuration configuration;
 
-  private Environment env;
+  private final Environment env;
 
   @Inject
   public Application(VocabProvider vocabProvider, LayoutProvider layoutProvider, Configuration configuration,Environment env) {
@@ -271,7 +271,7 @@ public class Application extends Controller {
   private Result validationErrorPage(Request req,String pageLocation) throws IOException {
     TemplateLoader loader = layoutProvider.getTemplateLoader();
     loader.setPrefix(getDeployUrl(req));
-    return notFound(loader.sourceAt(pageLocation).content()).as(MIME_TYPE_TEXT_HTML);
+    return badRequest(loader.sourceAt(pageLocation).content()).as(MIME_TYPE_TEXT_HTML);
   }
 
   private Result notFoundPage(Request request) {
@@ -400,13 +400,11 @@ public class Application extends Controller {
 
   private Locale getLocale(Http.Request request, String language) {
     Locale[] requestedLocales = getRequestedLocales(request, language);
-    if (requestedLocales != null) {
       for (Locale requestedLocale : requestedLocales) {
         if (Arrays.asList(availableLocals).contains(requestedLocale)) {
           return requestedLocale;
         }
       }
-    }
     return availableLocals[0];
   }
 
@@ -419,9 +417,9 @@ public class Application extends Controller {
 
   private Locale[] getLocalesFromRequest(Http.Request request) {
     if (!request.acceptLanguages().isEmpty()) {
-      return request.acceptLanguages().stream().map(lang -> lang.toLocale()).toArray(Locale[]::new);
+      return request.acceptLanguages().stream().map(Lang::toLocale).toArray(Locale[]::new);
     }
-    return null;
+    return new Locale[0];
   }
 
   private Locale[] getLocalesByCode(String code) {
@@ -431,7 +429,7 @@ public class Application extends Controller {
   private String setAlternates(Request request, String id, String version, boolean includeVocab) {
 
     List<String> alternates = new ArrayList<>();
-    if (request.queryString().size() > 0) {
+    if (!request.queryString().isEmpty()) {
       List<String> recoveryParameters = new ArrayList<>();
       for (Map.Entry<String, String> parameter : getValidParameterValueMap(request, id).entrySet()) {
         recoveryParameters.add(parameter.getKey().concat("=").concat(parameter.getValue()));
@@ -463,7 +461,7 @@ public class Application extends Controller {
       for (String validParameter : validParams) {
         String suppliedParameter = request.getQueryString(validParameter);
         if (suppliedParameter != null) {
-            parameters.put(validParameter, StringEscapeUtils.escapeHtml4(request.getQueryString(validParameter)));
+            parameters.put(validParameter, StringEscapeUtils.escapeHtml4(request.queryString(validParameter).orElse(null)));
         }
       }
     }
@@ -477,8 +475,8 @@ public class Application extends Controller {
 
   /**
    * parses a date without an offset, such as '2011-12-03'
-   * @param value
-   * @return
+   * @param value of the date
+   * @return true if the date is valid
    */
   private boolean isValidDate(String value) {
     DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE;
@@ -491,7 +489,7 @@ public class Application extends Controller {
   }
 
   private boolean isValidRelatedURL(String value) {
-     return !blackListedUrlsPatterns.stream().anyMatch(p -> p.matcher(value).matches());
+     return blackListedUrlsPatterns.stream().noneMatch(p -> p.matcher(value).matches());
   }
 
   private static List<Pattern> getUrlPatterns(List<String> blackListedURLPatterns) {
@@ -504,7 +502,7 @@ public class Application extends Controller {
   }
 
   private static List<String> generateAvailableLanguageList(String languages) {
-    return languages!=null ? Arrays.stream(languages.split(" +")).toList() : Collections.EMPTY_LIST;
+    return languages!=null ? Arrays.stream(languages.split(" +")).toList() : Collections.emptyList();
   }
 
   private String getDeployUrl(Http.Request req) {
@@ -512,8 +510,9 @@ public class Application extends Controller {
       return configuration.underlying().getString("source.site.http");
     }
     return req.hasHeader("X-Deploy-Url")
-      ? req.headers().get("X-Deploy-Url").get()
+      ? req.header("X-Deploy-Url").get()
       : "/";
+
   }
 
   private static Map<String, Object> generateValueMap(Config queries)  {
