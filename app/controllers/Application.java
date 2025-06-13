@@ -26,6 +26,7 @@ import play.api.Configuration;
 import play.Logger;
 import play.api.Environment;
 import play.api.http.MediaRange;
+import play.i18n.Lang;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.Http.Request;
@@ -49,10 +50,10 @@ import java.util.ArrayList;
 public class Application extends Controller {
 
   public static final String JSON_LD = "JSON-LD";
-  public static final String MSG_PARAMETER_IS_NOT_SUPPORTED = "Parameter %s is not supported for this statement";
-  public static final String MSG_WRONG_DATE_PARAMETER_FORMAT = "Wrong format for the date parameter";
-  public static final String MSG_UNAUTHORISED_RELATED_URL_PARAM = "Unauthorised use of the relatedURL parameter";
-  public static final String MSG_UNSUPPORTED_LANGUAGE_PARAM = "Unsupported language %s";
+  public static final String ERROR_PAGE_UNSUPPORTED_PARAM = "/en/unsupportedParam.html";
+  public static final String ERROR_PAGE_UNSUPPORTED_DATE = "/en/unsupportedDate.html";
+  public static final String ERROR_PAGE_UNSUPPORTED_RELATED_URL = "/en/unsupportedRelatedURL.html";
+  public static final String ERROR_PAGE_UNSUPPORTED_LANGUAGE = "/en/unsupportedLanguage.html";
   public static final String MIME_TYPE_TEXT_HTML = "text/html";
   public static final String REL_DERIVEDFROM = ">; rel=derivedfrom";
   private static final Map<String, Object> mimeTypeParserMap = generateParserMap();
@@ -86,7 +87,7 @@ public class Application extends Controller {
 
   private static final List<String> languages = generateAvailableLanguageList(ConfigFactory.load().getString("languages.available"));
 
-  public static final Locale[] availableLocals = languages.stream().map(Locale::forLanguageTag).toArray(Locale[]::new);
+  protected static final Locale[] availableLocals = languages.stream().map(Locale::forLanguageTag).toArray(Locale[]::new);
 
   private static final List<Pattern> blackListedUrlsPatterns = getUrlPatterns(ConfigFactory.load().getStringList("blacklist.relatedURL"));
 
@@ -96,7 +97,7 @@ public class Application extends Controller {
 
   private final Configuration configuration;
 
-  private Environment env;
+  private final Environment env;
 
   @Inject
   public Application(VocabProvider vocabProvider, LayoutProvider layoutProvider, Configuration configuration,Environment env) {
@@ -135,8 +136,9 @@ public class Application extends Controller {
   public Result getVocabPage(String version, String language,Http.Request request) throws IOException {
 
     String validationResult = validateLanguageParam(language);
-    if(validationResult != null)
-      return status(400,validationResult);
+    if(validationResult != null) {
+      return validationErrorPage(request,validationResult);
+    }
 
     Model vocab = getVocabModel(version);
     Locale locale = getLocale(request, language);
@@ -181,8 +183,9 @@ public class Application extends Controller {
 
     HashMap<String, String> parameters = getValidParameterValueMap(req, id);
     String validationResult = validateParameters(parameters,req,language);
-    if(validationResult != null)
-      return status(400,validationResult);
+    if(validationResult != null) {
+      return validationErrorPage(req,validationResult);
+    }
 
     Model rightsStatement = getStatementModel(id, version);
     Locale locale = getLocale(req, language);
@@ -201,14 +204,14 @@ public class Application extends Controller {
     for ( String  e :  req.queryString().keySet()) {
       String value = req.getQueryString(e);
       //language parameter is later validated based on available languages
-      if (!"language".equals(e) && !parameters.keySet().contains(e)) {
-        return String.format(MSG_PARAMETER_IS_NOT_SUPPORTED, e);
+      if (!"language".equals(e) && !parameters.containsKey(e)) {
+        return ERROR_PAGE_UNSUPPORTED_PARAM;
       }
       if ("relatedURL".equals(e) && !isValidRelatedURL(value)) {
-        return MSG_UNAUTHORISED_RELATED_URL_PARAM;
+        return ERROR_PAGE_UNSUPPORTED_RELATED_URL;
       }
       if ("date".equals(e) && !isValidDate(value)) {
-        return MSG_WRONG_DATE_PARAMETER_FORMAT;
+        return ERROR_PAGE_UNSUPPORTED_DATE;
       }
     }
     return validateLanguageParam(language);
@@ -216,9 +219,10 @@ public class Application extends Controller {
 
   private static String validateLanguageParam(String value) {
     //validate language only if parameter is provide
-    if(!StringUtils.isBlank(value) && !languages.contains(value))
-       return String.format(MSG_UNSUPPORTED_LANGUAGE_PARAM, value);
-     return null;
+    if(!StringUtils.isBlank(value) && !languages.contains(value)) {
+      return ERROR_PAGE_UNSUPPORTED_LANGUAGE;
+    }
+    return null;
   }
 
   public Result getCollection(String id, String version,Http.Request req) {
@@ -245,8 +249,9 @@ public class Application extends Controller {
 
   public Result getCollectionPage(String id, String version, String language,Http.Request req) throws IOException {
     String validationResult = validateLanguageParam(language);
-    if(validationResult != null)
-      return status(400,validationResult);
+    if(validationResult != null) {
+      return validationErrorPage(req,validationResult);
+    }
 
     Model collection = getVocabModel(version);
     Locale locale = getLocale(req, language);
@@ -262,6 +267,12 @@ public class Application extends Controller {
         locale.getLanguage(), null, req);
 
     return status(OK,page).withHeaders("Link", concat, HttpHeaders.CONTENT_LANGUAGE, locale.getLanguage()).as(MIME_TYPE_TEXT_HTML);
+  }
+
+  private Result validationErrorPage(Request req,String pageLocation) throws IOException {
+    TemplateLoader loader = layoutProvider.getTemplateLoader();
+    loader.setPrefix(getDeployUrl(req));
+    return badRequest(loader.sourceAt(pageLocation).content()).as(MIME_TYPE_TEXT_HTML);
   }
 
   private Result notFoundPage(Request request) {
@@ -390,13 +401,11 @@ public class Application extends Controller {
 
   private Locale getLocale(Http.Request request, String language) {
     Locale[] requestedLocales = getRequestedLocales(request, language);
-    if (requestedLocales != null) {
       for (Locale requestedLocale : requestedLocales) {
         if (Arrays.asList(availableLocals).contains(requestedLocale)) {
           return requestedLocale;
         }
       }
-    }
     return availableLocals[0];
   }
 
@@ -409,9 +418,9 @@ public class Application extends Controller {
 
   private Locale[] getLocalesFromRequest(Http.Request request) {
     if (!request.acceptLanguages().isEmpty()) {
-      return request.acceptLanguages().stream().map(lang -> lang.toLocale()).toArray(Locale[]::new);
+      return request.acceptLanguages().stream().map(Lang::toLocale).toArray(Locale[]::new);
     }
-    return null;
+    return new Locale[0];
   }
 
   private Locale[] getLocalesByCode(String code) {
@@ -421,7 +430,7 @@ public class Application extends Controller {
   private String setAlternates(Request request, String id, String version, boolean includeVocab) {
 
     List<String> alternates = new ArrayList<>();
-    if (request.queryString().size() > 0) {
+    if (!request.queryString().isEmpty()) {
       List<String> recoveryParameters = new ArrayList<>();
       for (Map.Entry<String, String> parameter : getValidParameterValueMap(request, id).entrySet()) {
         recoveryParameters.add(parameter.getKey().concat("=").concat(parameter.getValue()));
@@ -453,7 +462,7 @@ public class Application extends Controller {
       for (String validParameter : validParams) {
         String suppliedParameter = request.getQueryString(validParameter);
         if (suppliedParameter != null) {
-            parameters.put(validParameter, StringEscapeUtils.escapeHtml4(request.getQueryString(validParameter)));
+            parameters.put(validParameter, StringEscapeUtils.escapeHtml4(request.queryString(validParameter).orElse(null)));
         }
       }
     }
@@ -467,8 +476,8 @@ public class Application extends Controller {
 
   /**
    * parses a date without an offset, such as '2011-12-03'
-   * @param value
-   * @return
+   * @param value of the date
+   * @return true if the date is valid
    */
   private boolean isValidDate(String value) {
     DateTimeFormatter formatter = DateTimeFormatter.ISO_LOCAL_DATE;
@@ -481,7 +490,7 @@ public class Application extends Controller {
   }
 
   private boolean isValidRelatedURL(String value) {
-     return !blackListedUrlsPatterns.stream().anyMatch(p -> p.matcher(value).matches());
+     return blackListedUrlsPatterns.stream().noneMatch(p -> p.matcher(value).matches());
   }
 
   private static List<Pattern> getUrlPatterns(List<String> blackListedURLPatterns) {
@@ -494,7 +503,7 @@ public class Application extends Controller {
   }
 
   private static List<String> generateAvailableLanguageList(String languages) {
-    return languages!=null ? Arrays.stream(languages.split(" +")).toList() : Collections.EMPTY_LIST;
+    return languages!=null ? Arrays.stream(languages.split(" +")).toList() : Collections.emptyList();
   }
 
   private String getDeployUrl(Http.Request req) {
@@ -502,8 +511,9 @@ public class Application extends Controller {
       return configuration.underlying().getString("source.site.http");
     }
     return req.hasHeader("X-Deploy-Url")
-      ? req.headers().get("X-Deploy-Url").get()
+      ? req.header("X-Deploy-Url").get()
       : "/";
+
   }
 
   private static Map<String, Object> generateValueMap(Config queries)  {
