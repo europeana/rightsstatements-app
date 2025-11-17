@@ -496,7 +496,7 @@ public class Application extends Controller {
   private static List<Pattern> getUrlPatterns(List<String> blackListedURLPatterns) {
      List<Pattern> patternList = new ArrayList<>();
     for(String s : blackListedURLPatterns){
-        Pattern urlPattern = Pattern.compile(s);
+        Pattern urlPattern = Pattern.compile(s, Pattern.DOTALL);
         patternList.add(urlPattern);
     }
     return patternList;
