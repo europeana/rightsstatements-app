@@ -10,7 +10,6 @@ Clone this repository
 
 
 
-
 === Information below is deprecated ===
 
 rights-app is built with [Play Framework](https://www.playframework.com/) 2.4.3 so you need to make sure to have the
