@@ -18,7 +18,7 @@ spec:
               httpHeaders:
                 - name: Accept
                   value: application/json
-            initialDelaySeconds: 125
+            initialDelaySeconds: 90
             periodSeconds: 30
             timeoutSeconds: 180
           readinessProbe:
@@ -28,6 +28,6 @@ spec:
               httpHeaders:
                 - name: Accept
                   value: application/json
-            initialDelaySeconds: 125
+            initialDelaySeconds: 90
             periodSeconds: 30
             timeoutSeconds: 180
