@@ -43,7 +43,7 @@
   <logger name="play" level="INFO"/>
   <logger name="application" level="INFO"/>
 
-  <root>
+  <root level="WARN">
     <!--<appender-ref ref="ASYNCFILE"/>  For production not using the File logging -->
     <appender-ref ref="ASYNCSTDOUT"/>
   </root>
